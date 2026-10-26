@@ -1,3 +1,12 @@
+import { namespaceWorktreeAttemptStore } from "../../lib/namespaceWorktreeAttempt";
+import { completeNamespaceWorktreeDraft } from "../../lib/namespaceWorktreeDraft";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { readPrimaryEnvironmentId } from "../../state/environments";
+import { sendNamespaceWorktree } from "../../lib/namespaceWorktree";
+import {
+  namespaceWorktreeBlockReason,
+  namespaceWorktreeRequestId,
+} from "../../lib/namespaceWorktree.logic";
 import {
   mergeDirectPreviewAnnotation,
   resolveBackgroundDraftWorkspaceOptions,
@@ -863,6 +872,144 @@ export function useComposerSend(input: ComposerSendInput) {
 
     sendInFlightRef.current = true;
     const sendGeneration = ++composerSendGenerationRef.current;
+    const sourceConfig = appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId);
+    const namespacePolicy = sourceConfig
+      ? resolveProjectSettings(sourceConfig.settings, activeProject.id, activeProject).settings
+          .namespaceWorktrees
+      : null;
+    let namespaceAttemptPending = false;
+    try {
+      namespaceAttemptPending =
+        !isServerThread && namespaceWorktreeAttemptStore().has(threadIdForSend);
+    } catch (error) {
+      sendInFlightRef.current = false;
+      setThreadError(
+        threadIdForSend,
+        error instanceof Error
+          ? error.message
+          : "Could not check previous Namespace sends. Your draft has been kept.",
+      );
+      return;
+    }
+    if (
+      !isServerThread &&
+      !activeThread.worktreePath &&
+      ((sendEnvMode === "worktree" && namespacePolicy) || namespaceAttemptPending)
+    ) {
+      const blockReason = namespaceWorktreeBlockReason({
+        desktopLocalController:
+          Boolean(window.desktopBridge) && environmentId === readPrimaryEnvironmentId(),
+        supported: sourceConfig?.namespaceWorktrees === true,
+        multipleModels: multipleModelSelections !== null,
+        sourceContext:
+          composerTerminalContexts.length > 0 ||
+          composerPreviewAnnotationsSnapshot.length > 0 ||
+          composerReviewCommentsSnapshot.length > 0 ||
+          composerThreadContextsSnapshot.length > 0,
+        attachments: composerAttachmentsSnapshot,
+      });
+      if (blockReason || (!baseBranchForWorktree && !namespaceAttemptPending) || !draftId) {
+        sendInFlightRef.current = false;
+        setThreadError(
+          threadIdForSend,
+          blockReason ?? "Select a base branch before preparing the Namespace worktree.",
+        );
+        return;
+      }
+      beginLocalDispatch({ preparingWorktree: true, submissionIntent });
+      setThreadError(threadIdForSend, null);
+      try {
+        const submitted = await sendNamespaceWorktree({
+          sourceEnvironmentId: environmentId,
+          preparation: {
+            projectId: activeProject.id,
+            requestId: namespaceWorktreeRequestId(threadIdForSend),
+            baseRef: baseBranchForWorktree ?? activeThreadBranch ?? "HEAD",
+            ...(startFromOrigin ? { startFromOrigin: true } : {}),
+          },
+          threadId: threadIdForSend,
+          title: deriveThreadTitleSeed({
+            text: messageTextForSend,
+            attachments: composerAttachmentsSnapshot,
+            fallbackLabels: sendTitleFallbackLabels(sendSnapshot),
+          }),
+          text: outgoingMessageText,
+          selection: ctxSelectedModelSelection,
+          driver: ctxSelectedProvider,
+          runtimeMode,
+          interactionMode: sendInteractionMode,
+          snapshot: sendSnapshot,
+          promptAtSend,
+          buildContext: buildOutgoingMessageContext,
+        });
+        const remoteRef = submitted.threadRef;
+        const completion = completeNamespaceWorktreeDraft({
+          draftId,
+          threadId: threadIdForSend,
+          remoteRef,
+          promptAtSend: submitted.promptAtSend,
+          snapshot: submitted.snapshot,
+        });
+        namespaceWorktreeAttemptStore().release(threadIdForSend);
+        if (completion === "promoted") releaseDraftAttachments(submitted.snapshot.attachments);
+        if (
+          completion === "promoted" &&
+          currentRouteThreadKeyRef.current === routeThreadKey &&
+          submissionIntent !== "background"
+        ) {
+          promptRef.current = "";
+          composerRef.current?.resetCursorState();
+          await navigate({
+            to: "/$environmentId/$threadId",
+            params: buildThreadRouteParams(remoteRef),
+          });
+        } else {
+          if (
+            completion === "promoted" &&
+            submissionIntent === "background" &&
+            currentRouteThreadKeyRef.current === routeThreadKey
+          ) {
+            await handleNewThread(
+              scopeProjectRef(activeProject.environmentId, activeProject.id),
+              resolveBackgroundDraftWorkspaceOptions({
+                envMode: sendEnvMode,
+                branch: activeThreadBranch,
+                startFromOrigin,
+              }),
+            );
+          }
+          toastManager.add(
+            stackedThreadToast({
+              type: "success",
+              title:
+                completion === "retained"
+                  ? "Started remotely; new input kept in this draft"
+                  : "Started in Namespace",
+              actionProps: {
+                children: "Open thread",
+                onClick: () => {
+                  void navigate({
+                    to: "/$environmentId/$threadId",
+                    params: buildThreadRouteParams(remoteRef),
+                  });
+                },
+              },
+            }),
+          );
+        }
+      } catch (error) {
+        setThreadError(
+          threadIdForSend,
+          error instanceof Error
+            ? error.message
+            : "Could not prepare the Namespace worktree. Your draft has been kept.",
+        );
+      } finally {
+        sendInFlightRef.current = false;
+        resetLocalDispatch();
+      }
+      return;
+    }
     const attachmentCapabilitiesBeforeUpload = readLiveAttachmentCapabilities();
     if (attachmentCapabilitiesBeforeUpload.fileBlockReason !== null) {
       sendInFlightRef.current = false;

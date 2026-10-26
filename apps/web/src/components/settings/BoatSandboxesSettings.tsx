@@ -1,3 +1,5 @@
+import { NamespaceTemplateFields, useNamespaceTemplates } from "./NamespaceWorktreeSetting";
+import { namespaceTemplateBlockReason } from "./NamespaceWorktreeSetting.logic";
 import { useAtom, useAtomValue } from "@effect/atom-react";
 import {
   type EnvironmentId,
@@ -42,12 +44,6 @@ const MACHINE_TYPES = [
   { value: "default", label: "Default" },
   { value: "large", label: "Large" },
   { value: "xlarge", label: "Extra large" },
-] as const;
-const NAMESPACE_MACHINE_TYPES = [
-  { value: "small", label: "Small · 4 CPU / 8 GiB" },
-  { value: "default", label: "Default · 8 CPU / 16 GiB" },
-  { value: "large", label: "Large · 16 CPU / 32 GiB" },
-  { value: "xlarge", label: "Extra large · 32 CPU / 64 GiB" },
 ] as const;
 
 export function BoatSandboxesSettings({
@@ -171,6 +167,14 @@ function BoatEnvironmentSettings({
   const configured =
     query.data?.providers.some((entry) => entry.provider === provider && entry.configured) === true;
 
+  const templates = useNamespaceTemplates(
+    provider === "namespace" && canConfigure && configured ? environmentId : null,
+  );
+  const templateBlockReason =
+    provider === "namespace"
+      ? namespaceTemplateBlockReason(templateId.trim(), templates.data)
+      : null;
+
   const handleConfigure = async () => {
     if (!canConfigure || busy || !apiKey.trim()) return;
     const key = apiKey.trim();
@@ -231,12 +235,20 @@ function BoatEnvironmentSettings({
 
   const handleCreate = async () => {
     if (unresolvedAttempt) return submitCreate(unresolvedAttempt);
+    if (templateBlockReason) {
+      setError(templateBlockReason);
+      return;
+    }
+    const selectedTemplate =
+      provider === "namespace"
+        ? templates.data?.find((template) => `blueprint:${template.id}` === templateId.trim())
+        : null;
     const decoded = parseSandboxCreateDraft({
       requestId: randomUUID(),
       provider,
       name,
       templateId,
-      machineType,
+      machineType: selectedTemplate?.machineType ?? machineType,
       ttlHours,
     });
     if (Option.isNone(decoded)) {
@@ -307,7 +319,11 @@ function BoatEnvironmentSettings({
       ) : null}
       <SettingsRow
         title={`Create a ${providerLabel} sandbox`}
-        description={`${provider === "boat" ? "Use a clean saved Boat template with your tools preinstalled." : "Use a clean Namespace image with Node.js 24+, npm, systemd and sudo. Accepts builtin:* images, image names and OCI references."} Do not include T3 userdata, provider sessions or connection credentials. Connect prepares an independent T3 service. Sign in to your chosen providers after connecting.`}
+        description={
+          provider === "boat"
+            ? "Use a clean saved Boat template with your tools preinstalled. Do not include T3 userdata, provider sessions or connection credentials. Connect prepares an independent T3 service. Sign in to your chosen providers after connecting."
+            : "Choose a saved Namespace template or an image with Node.js 24+, npm, systemd, sudo and your agent authentication already configured. Exclude T3 userdata and T3 connection identities. Connect prepares an independent T3 service."
+        }
       >
         {provider === "namespace" ? (
           <p className="pb-3 text-xs text-muted-foreground">
@@ -368,51 +384,53 @@ function BoatEnvironmentSettings({
                   />
                 </label>
                 {provider === "namespace" ? (
-                  <div className="space-y-1 text-xs">
-                    <span>Duration policy</span>
-                    <p className="text-muted-foreground">
-                      Namespace applies your plan's runtime and idle limits. No custom stop deadline
-                      is set.
-                    </p>
+                  <div className="sm:col-span-2">
+                    <NamespaceTemplateFields
+                      environmentId={configured ? environmentId : null}
+                      query={templates}
+                      image={templateId}
+                      machineType={machineType}
+                      onChange={(image, type) => {
+                        setTemplateId(image);
+                        setMachineType(type);
+                      }}
+                    />
                   </div>
                 ) : (
                   <label className="space-y-1 text-xs">
-                    <span>TTL (hours, maximum 720)</span>
+                    <span>Template ID</span>
                     <Input
                       size="sm"
-                      type="number"
-                      min={1}
-                      max={720}
-                      step={1}
+                      value={templateId}
+                      onChange={(event) => setTemplateId(event.target.value)}
                       required
-                      value={ttlHours}
-                      onChange={(event) => setTtlHours(event.target.value)}
+                      maxLength={255}
                     />
                   </label>
                 )}
-                <div className="space-y-1 text-xs">
-                  <span>Machine type</span>
-                  <Select
-                    items={provider === "boat" ? MACHINE_TYPES : NAMESPACE_MACHINE_TYPES}
-                    value={machineType}
-                    onValueChange={(value) => {
-                      if (value !== null) setMachineType(value);
-                    }}
-                  >
-                    <SelectTrigger size="sm" aria-label={`${providerLabel} machine type`}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectPopup>
-                      {(provider === "boat" ? MACHINE_TYPES : NAMESPACE_MACHINE_TYPES).map(
-                        ({ value, label }) => (
+                {provider === "boat" ? (
+                  <div className="space-y-1 text-xs">
+                    <span>Machine type</span>
+                    <Select
+                      items={MACHINE_TYPES}
+                      value={machineType}
+                      onValueChange={(value) => {
+                        if (value !== null) setMachineType(value);
+                      }}
+                    >
+                      <SelectTrigger size="sm" aria-label={`${providerLabel} machine type`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectPopup>
+                        {MACHINE_TYPES.map(({ value, label }) => (
                           <SelectItem key={value} value={value}>
                             {label}
                           </SelectItem>
-                        ),
-                      )}
-                    </SelectPopup>
-                  </Select>
-                </div>
+                        ))}
+                      </SelectPopup>
+                    </Select>
+                  </div>
+                ) : null}
                 {provider === "namespace" ? (
                   <div className="space-y-1 text-xs">
                     <span>Duration policy</span>
@@ -440,7 +458,9 @@ function BoatEnvironmentSettings({
               <Button
                 type="submit"
                 size="sm"
-                disabled={!name.trim() || !templateId.trim() || !ttlHours}
+                disabled={
+                  !name.trim() || !templateId.trim() || !ttlHours || templateBlockReason !== null
+                }
               >
                 {busy ? "Creating…" : "Create sandbox"}
               </Button>

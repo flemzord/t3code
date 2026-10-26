@@ -5,10 +5,13 @@ import {
   SandboxCreateInput,
   SandboxIdInput,
   SandboxListResult,
+  NamespaceWorktreePrepareInput,
+  NamespaceWorktreePrepareResult,
 } from "@t3tools/contracts";
 import { Tool, Toolkit } from "effect/ai";
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as SandboxService from "../../../sandboxes/SandboxService.ts";
+import * as NamespaceWorktreeService from "../../../sandboxes/NamespaceWorktreeService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 
 const shared = {
@@ -18,10 +21,18 @@ const shared = {
     McpInvocationContext.McpInvocationContext,
     ThreadManagement.ThreadManagementService,
     SandboxService.SandboxService,
+    NamespaceWorktreeService.NamespaceWorktreeService,
   ],
 };
 
 export const SandboxToolkit = Toolkit.make(
+  Tool.make("t3_namespace_worktree_prepare", {
+    ...shared,
+    description:
+      "Prepare a fresh billed Namespace VM for a new worktree using the source project's Namespace policy. Reuse requestId across retries. Transfers committed Git history, including unpushed commits, but not uncommitted files. Returns the SSH destination and prepared project/worktree; it does not launch an agent. Connect using a Namespace-capable Desktop client, then start the thread on that environment with existing_worktree. Agent credentials must already be available in the selected image or template.",
+    parameters: NamespaceWorktreePrepareInput,
+    success: NamespaceWorktreePrepareResult,
+  }).annotate(Tool.Destructive, true),
   Tool.make("t3_sandbox_list", {
     ...shared,
     description:
@@ -34,7 +45,7 @@ export const SandboxToolkit = Toolkit.make(
   Tool.make("t3_sandbox_create", {
     ...shared,
     description:
-      "Create a billed cloud machine from a clean saved snapshot. Persist and reuse requestId on retries. Templates must exclude T3 identities and sessions. Configure provider and repository access on the new environment. Creation does not move existing threads. Namespace templateId is a clean image name or OCI reference, not a blueprint; ttlSeconds must be 10800 and does not configure its provider plan duration. Namespace Connect requires Desktop and its local controller with devbox CLI login.",
+      "Create a billed cloud machine from a clean saved snapshot. Persist and reuse requestId on retries. Templates must exclude T3 identities and sessions. Provider authentication may already be present in the image. Creation does not move existing threads. Namespace templateId is an image name, OCI reference, or blueprint:<id>; blueprints keep their own machine shape; ttlSeconds must be 10800 and does not configure its provider plan duration. Namespace Connect requires Desktop and its local controller with devbox CLI login.",
     parameters: SandboxCreateInput,
     success: ManagedSandbox,
   }).annotate(Tool.Destructive, true),

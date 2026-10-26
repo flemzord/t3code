@@ -829,6 +829,26 @@ const make = Effect.gen(function* () {
       }
 
       const launchReceipt = yield* readReceipt(input, input.commandId);
+      const acceptedLaunch =
+        Option.isSome(launchReceipt) &&
+        launchReceipt.value.status === "accepted" &&
+        launchReceipt.value.commandType ===
+          (input.reuseExistingThread === true ? "thread.metadata.update" : "thread.create");
+      if (input.workspaceStrategy.type === "worktree" && !acceptedLaunch) {
+        const settings = yield* serverSettings.getSettings.pipe(
+          Effect.mapError(mapError(input, "provision-worktree")),
+        );
+        if (
+          resolveProjectSettings(settings, input.projectId).settings.namespaceWorktrees !== null
+        ) {
+          return yield* mapError(
+            input,
+            "provision-worktree",
+          )(
+            "This project requires a Namespace VM for new worktrees. Send the first message from a Namespace-capable desktop client.",
+          );
+        }
+      }
       yield* threads.assertProviderInstanceEnabled({
         projectId: input.projectId,
         commandId: input.commandId,

@@ -11,6 +11,9 @@ type WsRpcMethod = RpcGroup.Rpcs<typeof WsRpcGroup>["_tag"];
 
 // Trace queries and dashboards depend on these labels, including deviations from method prefixes.
 const RPC_AGGREGATES = {
+  [WS_METHODS.namespaceWorktreesPrepare]: "sandboxes",
+  [WS_METHODS.namespaceWorktreesGetPreparation]: "sandboxes",
+  [WS_METHODS.namespaceTemplatesList]: "sandboxes",
   [WS_METHODS.sandboxesConfigure]: "sandboxes",
   [WS_METHODS.sandboxesList]: "sandboxes",
   [WS_METHODS.sandboxesCreate]: "sandboxes",

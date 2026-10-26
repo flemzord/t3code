@@ -1,3 +1,6 @@
+import * as ProcessRunner from "./processRunner.ts";
+import * as NamespaceWorktreeService from "./sandboxes/NamespaceWorktreeService.ts";
+import * as NamespaceClient from "./sandboxes/NamespaceClient.ts";
 import * as SandboxService from "./sandboxes/SandboxService.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -394,9 +397,12 @@ it.effect("shell snapshots omit idle children and older settled threads only on 
 
 // Build the production RPC layer; unrelated capabilities fail if this test calls them.
 const layerUnusedConfigRpcServices = Layer.mergeAll(
+  Layer.mock(ProcessRunner.ProcessRunner)({}),
   Layer.mock(DocumentText.DocumentText)({}),
   Layer.mock(ServerSecretStore.ServerSecretStore)({}),
   Layer.mock(SandboxService.SandboxService)({}),
+  Layer.mock(NamespaceWorktreeService.NamespaceWorktreeService)({}),
+  Layer.mock(NamespaceClient.NamespaceClient)({ creationReplayWindowMs: 0 }),
   Layer.mock(WorkspacePaths.WorkspacePaths)({}),
   Layer.mock(TraceDiagnostics.TraceDiagnostics)({}),
   Layer.mock(ProjectFaviconResolver.ProjectFaviconResolver)({}),

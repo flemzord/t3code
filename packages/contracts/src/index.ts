@@ -69,3 +69,5 @@ export * from "./worktreeSetup.ts";
 export * from "./secretRequest.ts";
 export * from "./clientRpcPermissions.ts";
 export * from "./sandboxes.ts";
+export * from "./namespaceWorktrees.ts";
+export * from "./namespaceTemplates.ts";

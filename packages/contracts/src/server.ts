@@ -581,6 +581,7 @@ export type ServerEventLoopStall = typeof ServerEventLoopStall.Type;
 
 export const ServerConfig = Schema.Struct({
   managedSandboxes: Schema.optionalKey(Schema.Boolean),
+  namespaceWorktrees: Schema.optionalKey(Schema.Boolean),
   environment: ExecutionEnvironmentDescriptor,
   auth: ServerAuthDescriptor,
   cwd: TrimmedNonEmptyString,

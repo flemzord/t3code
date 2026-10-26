@@ -9,6 +9,7 @@ import {
   type WorktreeMcpSetupScriptStatus,
   type WorktreeMcpStatusResult,
 } from "@t3tools/contracts";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -160,6 +161,15 @@ const make = Effect.gen(function* () {
 
     const project = yield* loadProject(scope, projection.thread.projectId);
     const projectCwd = project.workspaceRoot;
+    const settings = yield* serverSettings.getSettings.pipe(
+      asOperationFailed("Unable to read server settings"),
+    );
+    if (resolveProjectSettings(settings, project.id).settings.namespaceWorktrees !== null) {
+      return yield* failure(
+        "invalid_request",
+        "This project requires a Namespace VM for new worktrees. Send the first message from a Namespace-capable desktop client.",
+      );
+    }
 
     const localStatus = yield* gitWorkflow
       .localStatus({ cwd: projectCwd })

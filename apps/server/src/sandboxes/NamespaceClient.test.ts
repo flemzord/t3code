@@ -36,6 +36,9 @@ const decodeCreatedImage = Schema.decodeUnknownEffect(
 );
 const setup = (
   options: {
+    responses?: Readonly<Record<string, readonly unknown[]>>;
+    workspaceOutputs?: readonly string[];
+    captureUpload?: boolean;
     status?: number;
     missing?: boolean;
     running?: boolean;
@@ -67,6 +70,9 @@ const setup = (
     }> = [];
     const processes: ProcessRunner.ProcessRunInput[] = [];
     const tokenFiles: string[] = [];
+    const uploadedBytes: Uint8Array[] = [];
+    let workspaceOutputIndex = 0;
+    const responseCounts = new Map<string, number>();
     const http = HttpClient.make((request) => {
       const method = request.url.split("/").at(-1)!;
       const body =
@@ -75,8 +81,11 @@ const setup = (
           : null;
       requests.push({ method, body, headers: request.headers });
       const status = options.status ?? (options.missing && method === "Fetch" ? 404 : 200);
+      const responseIndex = responseCounts.get(method) ?? 0;
+      responseCounts.set(method, responseIndex + 1);
       const response =
-        status >= 400
+        options.responses?.[method]?.[responseIndex] ??
+        (status >= 400
           ? { code: status === 404 ? "not_found" : "unauthenticated", message: token }
           : options.malformed
             ? {}
@@ -87,7 +96,7 @@ const setup = (
                   labels: options.labels ?? [],
                 },
                 ...(options.running === false ? {} : { instanceId: "instance-1" }),
-              };
+              });
       return Effect.succeed(
         HttpClientResponse.fromWeb(request, Response.json(response, { status })),
       );
@@ -96,6 +105,8 @@ const setup = (
       run: (process) =>
         Effect.gen(function* () {
           processes.push(process);
+          if (options.captureUpload && process.args[0] === "upload")
+            uploadedBytes.push(yield* fs.readFile(process.args[2]!).pipe(Effect.orDie));
           if (options.cliMissing)
             return yield* new ProcessRunner.ProcessSpawnError({
               command: "devbox",
@@ -115,15 +126,17 @@ const setup = (
           }
           return {
             stdout:
-              process.command === "ssh" || process.args[0] === "exec"
-                ? JSON.stringify({
-                    environmentId:
-                      process.command === "ssh"
-                        ? (options.sshIdentity ?? "environment-1")
-                        : "environment-1",
-                    owner: id,
-                  })
-                : "",
+              options.workspaceOutputs && process.args[0] === "exec"
+                ? options.workspaceOutputs[workspaceOutputIndex++]!
+                : process.command === "ssh" || process.args[0] === "exec"
+                  ? JSON.stringify({
+                      environmentId:
+                        process.command === "ssh"
+                          ? (options.sshIdentity ?? "environment-1")
+                          : "environment-1",
+                      owner: id,
+                    })
+                  : "",
             stderr: options.cliFailure === process.args[0] ? token : "",
             code: ChildProcessSpawner.ExitCode(options.cliFailure === process.args[0] ? 1 : 0),
             timedOut: false,
@@ -158,7 +171,7 @@ const setup = (
         ),
       ),
     );
-    return { layer, requests, processes, tokenFiles, fs };
+    return { layer, requests, processes, tokenFiles, uploadedBytes, fs, home };
   }).pipe(Effect.provide(NodeServices.layer));
 
 describe("NamespaceClient", () => {
@@ -484,4 +497,248 @@ it.live("SSH verification refuses a runtime that is not the systemd service proc
     assert.strictEqual(result.code, 45);
     assert.strictEqual(result.stdout, "");
   }).pipe(Effect.provide(Layer.provideMerge(ProcessRunner.layer, NodeServices.layer))),
+);
+
+const workspaceInput = {
+  providerId: id,
+  bundlePath: "/tmp/source repo's $(touch forbidden).bundle",
+  commitSha: "a".repeat(40),
+  projectSubdirectory: "apps/a folder",
+  branch: "feature/work",
+  requestId: "request-1",
+  projectTitle: "Project",
+  remoteProjectId: "00000000-0000-4000-8000-000000000001",
+};
+const remoteBase = "/home/remote user/t3-workspaces/request-1";
+const workspaceDescriptor = {
+  owner: id,
+  home: "/home/remote user",
+  bundlePath: remoteBase + "/" + workspaceInput.commitSha + ".bundle",
+};
+const workspaceResult = {
+  projectId: workspaceInput.remoteProjectId,
+  workspaceRoot: remoteBase + "/repo/apps/a folder",
+  worktreePath: remoteBase + "/worktree/apps/a folder",
+  branch: workspaceInput.branch,
+};
+
+it.effect("uploads bundles as a file argument under the private Namespace credential scope", () =>
+  Effect.gen(function* () {
+    const fixture = yield* setup({
+      workspaceOutputs: [JSON.stringify(workspaceDescriptor), JSON.stringify(workspaceResult)],
+      captureUpload: true,
+    });
+    yield* Effect.gen(function* () {
+      const client = yield* NamespaceClient.NamespaceClient;
+      const input = {
+        ...workspaceInput,
+        bundlePath: fixture.home + "/source repo's $(touch forbidden).bundle",
+      };
+      const bytes = new Uint8Array([0, 255, 128, 10, 13, 42]);
+      yield* fixture.fs.writeFile(input.bundlePath, bytes);
+      assert.deepStrictEqual(yield* client.prepareWorkspace(input), workspaceResult);
+      assert.deepStrictEqual(fixture.uploadedBytes, [bytes]);
+      const upload = fixture.processes.find((process) => process.args[0] === "upload")!;
+      assert.deepStrictEqual(upload.args, [
+        "upload",
+        name,
+        input.bundlePath,
+        workspaceDescriptor.bundlePath,
+      ]);
+      for (const process of fixture.processes) assert.notInclude(JSON.stringify(process), token);
+      for (const filename of fixture.tokenFiles) assert.isFalse(yield* fixture.fs.exists(filename));
+    }).pipe(Effect.provide(fixture.layer));
+  }),
+);
+
+it.effect.each([
+  ["not json " + token],
+  [JSON.stringify({ ...workspaceDescriptor, owner: "someone-else" })],
+  [
+    JSON.stringify(workspaceDescriptor),
+    JSON.stringify({ ...workspaceResult, projectId: "another" }),
+  ],
+  [JSON.stringify(workspaceDescriptor), JSON.stringify({ ...workspaceResult, branch: "another" })],
+  [JSON.stringify(workspaceDescriptor), "not json " + token],
+])(
+  "rejects malformed or mismatched remote workspace output without exposing secrets: %j",
+  (workspaceOutputs) =>
+    Effect.gen(function* () {
+      const fixture = yield* setup({ workspaceOutputs });
+      yield* Effect.gen(function* () {
+        const client = yield* NamespaceClient.NamespaceClient;
+        const result = yield* Effect.result(client.prepareWorkspace(workspaceInput));
+        assert.strictEqual(result._tag, "Failure");
+        if (result._tag === "Failure") {
+          assert.strictEqual(result.failure.category, "bootstrap");
+          assert.notInclude(JSON.stringify(result.failure), token);
+        }
+        for (const filename of fixture.tokenFiles)
+          assert.isFalse(yield* fixture.fs.exists(filename));
+      }).pipe(Effect.provide(fixture.layer));
+    }),
+);
+
+it.effect("rejects workspace traversal before fetching or uploading", () =>
+  Effect.gen(function* () {
+    const fixture = yield* setup();
+    yield* Effect.gen(function* () {
+      const client = yield* NamespaceClient.NamespaceClient;
+      const result = yield* Effect.result(
+        client.prepareWorkspace({ ...workspaceInput, projectSubdirectory: "../outside" }),
+      );
+      assert.strictEqual(result._tag, "Failure");
+      assert.lengthOf(fixture.requests, 0);
+      assert.lengthOf(fixture.processes, 0);
+    }).pipe(Effect.provide(fixture.layer));
+  }),
+);
+
+const blueprint = {
+  id: "tpl123",
+  version: "9007199254740993",
+  spec: {
+    name: "agent-blueprint",
+    instance: {
+      shape: { virtualCpu: 4, memoryMegabytes: 8192, machineArch: "amd64", os: "linux" },
+    },
+    environment: [{ name: "TOKEN", value: token }],
+    integrations: { credential: token },
+    sessions: [{ command: token }],
+    initScript: token,
+  },
+};
+
+it.effect("lists every blueprint page and returns only public template metadata", () =>
+  Effect.gen(function* () {
+    const fixture = yield* setup({
+      responses: {
+        ListTemplates: [
+          { templates: [blueprint], paginationCursor: "YQ==" },
+          {
+            templates: [
+              {
+                ...blueprint,
+                id: "tpl-other",
+                version: "2",
+                spec: { ...blueprint.spec, name: "second" },
+              },
+            ],
+          },
+        ],
+      },
+    });
+    yield* Effect.gen(function* () {
+      const client = yield* NamespaceClient.NamespaceClient;
+      const templates = yield* client.listTemplates();
+      assert.deepStrictEqual(templates[0], {
+        id: blueprint.id,
+        name: blueprint.spec.name,
+        version: blueprint.version,
+        shape: blueprint.spec.instance.shape,
+        machineType: "small",
+        machineTypeOverrideSupported: false,
+        ttlOverrideSupported: false,
+        ttlPolicy: "provider_managed",
+      });
+      assert.strictEqual(templates[1]!.id, "tpl-other");
+      assert.notInclude(JSON.stringify(templates), token);
+      assert.deepStrictEqual(
+        fixture.requests.map((request) => request.body),
+        [{ maxEntries: "100" }, { maxEntries: "100", paginationCursor: "YQ==" }],
+      );
+    }).pipe(Effect.provide(fixture.layer));
+  }),
+);
+
+it.effect(
+  "creates from a blueprint ID after resolving its name and checking its immutable size",
+  () =>
+    Effect.gen(function* () {
+      const fixture = yield* setup({
+        responses: {
+          ListTemplates: [{ templates: [blueprint] }],
+          FetchTemplate: [{ template: blueprint }],
+        },
+      });
+      yield* Effect.gen(function* () {
+        const client = yield* NamespaceClient.NamespaceClient;
+        assert.strictEqual(
+          (yield* client.create({ ...input, templateId: "blueprint:" + blueprint.id })).id,
+          id,
+        );
+        assert.deepStrictEqual(
+          fixture.requests.map((request) => request.method),
+          ["ListTemplates", "FetchTemplate", "CreateFromTemplate"],
+        );
+        assert.deepStrictEqual(fixture.requests[1]!.body, { name: blueprint.spec.name });
+        assert.deepStrictEqual(fixture.requests[2]!.body, {
+          name,
+          templateId: blueprint.id,
+          activate: true,
+          overrides: { accessMode: "USER_PRIVATE" },
+          labels: [
+            { name: "t3-request-id", value: input.requestId },
+            { name: "t3-provider", value: "namespace" },
+          ],
+        });
+        assert.notInclude(JSON.stringify(fixture.requests.map((request) => request.body)), token);
+        assert.lengthOf(fixture.processes, 0);
+      }).pipe(Effect.provide(fixture.layer));
+    }),
+);
+
+it.effect.each([
+  { ...blueprint, id: "another-template" },
+  {
+    ...blueprint,
+    spec: {
+      ...blueprint.spec,
+      instance: {
+        shape: { ...blueprint.spec.instance.shape, virtualCpu: 8, memoryMegabytes: 16384 },
+      },
+    },
+  },
+  { ...blueprint, spec: { name: blueprint.spec.name } },
+])("refuses changed blueprint identity or an incompatible immutable machine: %j", (fetched) =>
+  Effect.gen(function* () {
+    const fixture = yield* setup({
+      responses: {
+        ListTemplates: [{ templates: [blueprint] }],
+        FetchTemplate: [{ template: fetched }],
+      },
+    });
+    yield* Effect.gen(function* () {
+      const client = yield* NamespaceClient.NamespaceClient;
+      const result = yield* Effect.result(
+        client.create({ ...input, templateId: "blueprint:" + blueprint.id }),
+      );
+      assert.strictEqual(result._tag, "Failure");
+      if (result._tag === "Failure") assert.strictEqual(result.failure.category, "conflict");
+      assert.isFalse(fixture.requests.some((request) => request.method === "CreateFromTemplate"));
+    }).pipe(Effect.provide(fixture.layer));
+  }),
+);
+
+it.effect.each([
+  [{ templates: [{ id: "tpl", spec: { name: 1 } }] }],
+  [
+    { templates: [blueprint], paginationCursor: "YQ==" },
+    { templates: [], paginationCursor: "YQ==" },
+  ],
+])(
+  "rejects malformed templates and pagination loops without exposing raw provider data: %j",
+  (pages) =>
+    Effect.gen(function* () {
+      const fixture = yield* setup({ responses: { ListTemplates: pages } });
+      yield* Effect.gen(function* () {
+        const client = yield* NamespaceClient.NamespaceClient;
+        const result = yield* Effect.result(client.listTemplates());
+        assert.strictEqual(result._tag, "Failure");
+        if (result._tag === "Failure") {
+          assert.strictEqual(result.failure.category, "uncertain");
+          assert.notInclude(JSON.stringify(result.failure), token);
+        }
+      }).pipe(Effect.provide(fixture.layer));
+    }),
 );

@@ -1,4 +1,5 @@
 import * as NamespaceClient from "./sandboxes/NamespaceClient.ts";
+import * as NamespaceWorktreeService from "./sandboxes/NamespaceWorktreeService.ts";
 import * as SandboxProviders from "./sandboxes/SandboxProviders.ts";
 import * as SandboxService from "./sandboxes/SandboxService.ts";
 import * as SandboxStore from "./sandboxes/SandboxStore.ts";
@@ -591,6 +592,22 @@ const layerSandboxes = SandboxService.layer.pipe(
   Layer.provide(ServerSecretStore.layer),
 );
 
+const layerNamespaceWorktrees = NamespaceWorktreeService.layer.pipe(
+  Layer.provide(
+    Layer.effect(
+      NamespaceWorktreeService.NamespaceWorkspaceTransport,
+      Effect.gen(function* () {
+        const client = yield* NamespaceClient.NamespaceClient;
+        return NamespaceWorktreeService.NamespaceWorkspaceTransport.of({
+          prepare: client.prepareWorkspace,
+        });
+      }),
+    ).pipe(Layer.provide(NamespaceClient.layer), Layer.provide(ServerSecretStore.layer)),
+  ),
+  Layer.provide(layerSandboxes),
+  Layer.provide(RuntimeLayer.layerProjectService),
+);
+
 const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   AgentAwarenessRelay.layer,
   HeldHooksWaker.layer,
@@ -635,6 +652,8 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   layerProviderInstallationRefresh,
   ReplayMarkers.layer,
   layerSandboxes,
+  layerNamespaceWorktrees,
+  NamespaceClient.layer,
   Layer.effectDiscard(ProjectSettingsOverrideSweep.sweep),
 ).pipe(
   Layer.provideMerge(layerOrchestrationApplication),

@@ -1,3 +1,6 @@
+import { assertLocalWorktreeAllowed } from "./sandboxes/localWorktreePolicy.ts";
+import * as NamespaceWorktreeService from "./sandboxes/NamespaceWorktreeService.ts";
+import * as NamespaceClient from "./sandboxes/NamespaceClient.ts";
 import * as SandboxService from "./sandboxes/SandboxService.ts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -1241,6 +1244,8 @@ export const layerWsRpc = (
     Effect.gen(function* () {
       const currentSessionId = currentSession.sessionId;
       const sandboxes = yield* SandboxService.SandboxService;
+      const namespaceWorktrees = yield* NamespaceWorktreeService.NamespaceWorktreeService;
+      const namespaceClient = yield* NamespaceClient.NamespaceClient;
       const sql = yield* SqlClient.SqlClient;
       const threadManagement = yield* ThreadManagementService.ThreadManagementService;
       const intakeContext = yield* Effect.context<
@@ -1792,6 +1797,7 @@ export const layerWsRpc = (
           },
           settings,
           managedSandboxes: true,
+          namespaceWorktrees: true,
           shellResumeCompletionMarker: true,
           shellThreadFamilies: true,
           shellOlderSettled: true,
@@ -2217,6 +2223,10 @@ export const layerWsRpc = (
           Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
             Effect.andThen(scheduledTasks.getWebhookDelivery(input)),
           ),
+        [WS_METHODS.namespaceWorktreesPrepare]: (input) => namespaceWorktrees.prepare(input),
+        [WS_METHODS.namespaceWorktreesGetPreparation]: (input) =>
+          namespaceWorktrees.getPreparation(input),
+        [WS_METHODS.namespaceTemplatesList]: () => namespaceClient.listTemplates(),
         [WS_METHODS.sandboxesConfigure]: (input) => sandboxes.configure(input),
         [WS_METHODS.sandboxesCreate]: (input) => sandboxes.create(input),
         [WS_METHODS.sandboxesRefresh]: (input) => sandboxes.refresh(input),
@@ -3020,12 +3030,16 @@ export const layerWsRpc = (
           ),
         [WS_METHODS.gitResolvePullRequest]: (input) => gitWorkflow.resolvePullRequest(input),
         [WS_METHODS.gitPreparePullRequestThread]: (input) =>
-          gitWorkflow
-            .preparePullRequestThread(input)
-            .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+          (input.mode === "worktree" ? assertLocalWorktreeAllowed(input.cwd) : Effect.void).pipe(
+            Effect.andThen(gitWorkflow.preparePullRequestThread(input)),
+            Effect.tap(() => refreshGitStatus(input.cwd)),
+          ),
         [WS_METHODS.vcsListRefs]: (input) => gitWorkflow.listRefs(input),
         [WS_METHODS.vcsCreateWorktree]: (input) =>
-          gitWorkflow.createWorktree(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+          assertLocalWorktreeAllowed(input.cwd).pipe(
+            Effect.andThen(gitWorkflow.createWorktree(input)),
+            Effect.tap(() => refreshGitStatus(input.cwd)),
+          ),
         [WS_METHODS.vcsRemoveWorktree]: (input) =>
           gitWorkflow.removeWorktree(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
         [WS_METHODS.vcsCreateRef]: (input) =>

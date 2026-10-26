@@ -200,12 +200,14 @@ it must be reachable when you manage machines. Creating machines uses your cloud
 provider account and incurs its normal charges.
 
 Create a machine from a clean template with the required development tools.
-For Boat, enter a saved snapshot name. For Namespace, enter a clean image name
-or OCI image reference; blueprints are not supported. The template needs Node.js 24 or newer,
-npm, systemd, curl, and passwordless sudo. Keep T3 identities, databases, connection
-credentials, and provider sessions out of the template. After the machine starts,
-choose **Connect**, sign in to your coding providers, and add your repository as
-a project. Threads and worktrees then run on that machine. The independent T3
+For Boat, enter a saved snapshot name. For Namespace, select a template or enter
+an image name or OCI image reference. A Namespace template keeps its own machine
+size; T3 does not override its size or runtime policy. The template needs Node.js
+24 or newer, npm, systemd, curl, Git, flock, and passwordless sudo. Keep T3
+identities, databases, and connection credentials out of the template. Your
+Namespace image can include provider authentication. After the machine starts,
+choose **Connect**, sign in to any unconfigured coding providers, and add your
+repository as a project. Threads and worktrees then run on that machine. The independent T3
 service keeps running when you close Desktop.
 
 Boat connects through its HTTPS endpoint, protected by T3 pairing. Namespace
@@ -213,6 +215,31 @@ connects through SSH and currently requires Desktop's local environment as the
 controller, with the official `devbox` CLI installed and signed in with `devbox login` to
 the same account and tenant as the saved API token. Other controller environments
 can manage its lifecycle, but cannot configure an SSH connection on your desktop.
+
+### One Namespace VM per new worktree
+
+Configure Namespace on Desktop's local controller, then open your project's
+settings and enable **Namespace worktrees** with the template or image to use.
+Include your coding provider and its authentication in that image.
+
+Start a new thread in worktree mode and send its first message. T3 creates a
+fresh VM, transfers the selected committed Git history, prepares the worktree,
+and opens the thread on that environment. Opening an empty draft creates no VM.
+Retries of the same draft reuse its preparation while the client stays open.
+After reloading during an uncertain send, automatic replay is blocked to protect
+the original message. Check the remote environment in **Cloud machines** before
+starting a new draft. Existing threads keep their VM.
+
+Unpushed commits are included; uncommitted files are not. Projects with Git LFS
+or submodules are currently rejected before VM creation. Machine-bound chat
+context must be removed and restored attachments must be reattached when their
+local bytes are unavailable. The selected coding provider and model must also
+be available in the image.
+
+Automatic launch currently requires Desktop's local controller and a single
+model. Other clients and direct worktree launch tools do not fall back to a local
+worktree when this policy is enabled. Machines remain in **Cloud machines** for
+manual stop, resume, and deletion; finishing a thread does not delete its VM.
 
 Use **Refresh** to reconcile a machine after a request fails or its state changes.
 Retry an unanswered creation with its original request; starting a new request

@@ -15,6 +15,7 @@ import { WS_METHODS } from "./rpc.ts";
 
 /** Incremental client enforcement; the server still authorizes every request. */
 export const CLIENT_GUARDED_RPC_SCOPES = {
+  [WS_METHODS.namespaceWorktreesPrepare]: AuthEnvironmentMaintainScope,
   [WS_METHODS.sandboxesConfigure]: AuthEnvironmentMaintainScope,
   [WS_METHODS.sandboxesCreate]: AuthEnvironmentMaintainScope,
   [WS_METHODS.sandboxesRefresh]: AuthEnvironmentMaintainScope,

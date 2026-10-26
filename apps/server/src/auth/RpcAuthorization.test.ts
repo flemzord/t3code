@@ -74,6 +74,9 @@ describe("RPC authorization scopes", () => {
       WS_METHODS.sandboxesResume,
       WS_METHODS.sandboxesRemove,
       WS_METHODS.sandboxesConnect,
+      WS_METHODS.namespaceWorktreesPrepare,
+      WS_METHODS.namespaceWorktreesGetPreparation,
+      WS_METHODS.namespaceTemplatesList,
     ]) {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthEnvironmentMaintainScope);
     }

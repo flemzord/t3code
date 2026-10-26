@@ -1,3 +1,4 @@
+import { NamespaceWorktreeSetting } from "./NamespaceWorktreeSetting";
 import {
   DEFAULT_SERVER_SETTINGS,
   type ModelSelection,
@@ -262,6 +263,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
         <>
           {modelRow}
           {workspaceRow}
+          <NamespaceWorktreeSetting />
         </>
       ) : category === "general" ? (
         <>
@@ -328,6 +330,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
             }
           />
           {workspaceRow}
+          <NamespaceWorktreeSetting />
           <SettingsRow
             serverScoped
             settingKeys={["worktreeSubmodules"]}

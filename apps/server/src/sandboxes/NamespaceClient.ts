@@ -12,6 +12,7 @@ import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import {
   SandboxOperationError,
+  type NamespaceTemplate,
   type SandboxCreateInput,
   type SandboxErrorCategory,
 } from "@t3tools/contracts";
@@ -19,6 +20,12 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import type { SandboxProviderClient } from "./SandboxProvider.ts";
 import { namespaceBootstrapScript, namespaceVerificationScript } from "./namespaceBootstrap.ts";
+import {
+  namespaceWorkspaceDescriptorScript,
+  namespaceWorkspaceScript,
+  type WorkspaceInput,
+  type WorkspaceResult,
+} from "./namespaceWorkspace.ts";
 
 const endpoint =
   "https://private-api.iad.namespaceapis.com/namespace.private.devbox.v1beta.DevBoxService";
@@ -33,6 +40,33 @@ const DevboxResponse = Schema.Struct({
   devbox: Devbox,
   instanceId: Schema.optionalKey(Schema.String),
 });
+const TemplateShape = Schema.Struct({
+  virtualCpu: Schema.Int,
+  memoryMegabytes: Schema.Int,
+  machineArch: Schema.optionalKey(Schema.String),
+  os: Schema.optionalKey(Schema.String),
+});
+const Template = Schema.Struct({
+  id: Schema.NonEmptyString,
+  version: Schema.optionalKey(
+    Schema.Union([
+      Schema.String.check(Schema.isPattern(/^[0-9]+$/)),
+      Schema.Int.check(
+        Schema.isGreaterThanOrEqualTo(0),
+        Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
+      ),
+    ]),
+  ),
+  spec: Schema.Struct({
+    name: Schema.NonEmptyString,
+    instance: Schema.optionalKey(Schema.Struct({ shape: Schema.optionalKey(TemplateShape) })),
+  }),
+});
+const TemplatePage = Schema.Struct({
+  templates: Schema.optionalKey(Schema.Array(Template)),
+  paginationCursor: Schema.optionalKey(Schema.String),
+});
+const TemplateResponse = Schema.Struct({ template: Template });
 const Descriptor = Schema.Struct({
   environmentId: Schema.NonEmptyString,
   owner: Schema.NonEmptyString,
@@ -48,6 +82,25 @@ const TokenClaims = Schema.Struct({
 const machineCpu = { small: 4, default: 8, large: 16, xlarge: 32 };
 const isOperationError = Schema.is(SandboxOperationError);
 const decodeDescriptor = Schema.decodeEffect(Schema.fromJsonString(Descriptor));
+const decodeWorkspaceDescriptor = Schema.decodeEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      owner: Schema.NonEmptyString,
+      home: Schema.NonEmptyString,
+      bundlePath: Schema.NonEmptyString,
+    }),
+  ),
+);
+const decodeWorkspaceResult = Schema.decodeEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      projectId: Schema.NonEmptyString,
+      workspaceRoot: Schema.NonEmptyString,
+      worktreePath: Schema.NonEmptyString,
+      branch: Schema.NonEmptyString,
+    }),
+  ),
+);
 const decodeTokenFile = Schema.decodeEffect(Schema.fromJsonString(TokenFile));
 const decodeTokenClaims = Schema.decodeEffect(Schema.fromJsonString(TokenClaims));
 const encodeTokenFile = Schema.encodeSync(Schema.fromJsonString(TokenFile));
@@ -55,6 +108,13 @@ const encodeTokenFile = Schema.encodeSync(Schema.fromJsonString(TokenFile));
 export class NamespaceClient extends Context.Service<
   NamespaceClient,
   SandboxProviderClient & {
+    readonly listTemplates: () => Effect.Effect<
+      readonly NamespaceTemplate[],
+      SandboxOperationError
+    >;
+    readonly prepareWorkspace: (
+      input: WorkspaceInput,
+    ) => Effect.Effect<WorkspaceResult, SandboxOperationError>;
     readonly validateCredential: (
       apiKey: string,
       ids: readonly string[],
@@ -90,11 +150,37 @@ const observation = (response: typeof DevboxResponse.Type) => ({
   state: response.instanceId ? "running" : "archived",
 });
 
+const templateMetadata = (template: typeof Template.Type): NamespaceTemplate => {
+  const value = template.spec.instance?.shape;
+  const shape = value
+    ? { ...value, machineArch: value.machineArch ?? "", os: value.os ?? "" }
+    : null;
+  const machineType =
+    shape?.os === "linux" && shape.machineArch === "amd64"
+      ? ((["small", "default", "large", "xlarge"] as const).find(
+          (type) =>
+            machineCpu[type] === shape.virtualCpu &&
+            shape.memoryMegabytes === machineCpu[type] * 2048,
+        ) ?? null)
+      : null;
+  return {
+    id: template.id,
+    name: template.spec.name,
+    version: template.version === undefined ? null : String(template.version),
+    shape,
+    machineType,
+    machineTypeOverrideSupported: false,
+    ttlOverrideSupported: false,
+    ttlPolicy: "provider_managed",
+  };
+};
+
 const make = Effect.gen(function* () {
   const http = yield* HttpClient.HttpClient;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const remotePath = yield* Path.Path.pipe(Effect.provide(Path.layer));
   const runner = yield* ProcessRunner.ProcessRunner;
   const crypto = yield* Crypto.Crypto;
   const home = yield* HostProcess.HomeDirectory;
@@ -142,6 +228,28 @@ const make = Effect.gen(function* () {
       ),
     );
   });
+  const listTemplates = Effect.fn("NamespaceClient.listTemplates")(function* () {
+    const templates: NamespaceTemplate[] = [];
+    const cursors = new Set<string>();
+    let paginationCursor = "";
+    for (let page = 0; page < 100; page++) {
+      const response = yield* request(
+        "ListTemplates",
+        {
+          maxEntries: "100",
+          ...(paginationCursor ? { paginationCursor } : {}),
+        },
+        TemplatePage,
+      );
+      for (const template of response.templates ?? []) templates.push(templateMetadata(template));
+      paginationCursor = response.paginationCursor ?? "";
+      if (!paginationCursor) return templates;
+      if (cursors.has(paginationCursor))
+        return yield* new SandboxOperationError({ category: "uncertain" });
+      cursors.add(paginationCursor);
+    }
+    return yield* new SandboxOperationError({ category: "uncertain" });
+  });
   const fetch = Effect.fn("NamespaceClient.fetch")(function* (id: string, candidateToken?: string) {
     if (!validId(id)) return yield* new SandboxOperationError({ category: "invalid_input" });
     return yield* request(
@@ -173,13 +281,38 @@ const make = Effect.gen(function* () {
       .slice(0, 60)}`;
   });
   const create = Effect.fn("NamespaceClient.create")(function* (input: SandboxCreateInput) {
-    if (
-      !validDuration(input.ttlSeconds) ||
-      !input.templateId.trim() ||
-      input.templateId.startsWith("blueprint:")
-    )
+    if (!validDuration(input.ttlSeconds) || !input.templateId.trim())
       return yield* new SandboxOperationError({ category: "invalid_input" });
     const name = yield* providerName(input.requestId);
+    if (input.templateId.startsWith("blueprint:")) {
+      const templateId = input.templateId.slice("blueprint:".length);
+      if (!validId(templateId))
+        return yield* new SandboxOperationError({ category: "invalid_input" });
+      const templates = yield* listTemplates();
+      const selected = templates.find((template) => template.id === templateId);
+      if (!selected) return yield* new SandboxOperationError({ category: "not_found" });
+      const response = yield* request("FetchTemplate", { name: selected.name }, TemplateResponse);
+      const current = templateMetadata(response.template);
+      if (current.id !== selected.id || current.machineType !== input.machineType)
+        return yield* new SandboxOperationError({ category: "conflict" });
+      // CreateFromTemplate has no machine or TTL overrides; the blueprint owns those policies.
+      return observation(
+        yield* request(
+          "CreateFromTemplate",
+          {
+            name,
+            templateId: current.id,
+            activate: true,
+            overrides: { accessMode: "USER_PRIVATE" },
+            labels: [
+              { name: "t3-request-id", value: input.requestId },
+              { name: "t3-provider", value: "namespace" },
+            ],
+          },
+          DevboxResponse,
+        ),
+      );
+    }
     const vCpu = machineCpu[input.machineType];
     const image = input.templateId;
     return observation(
@@ -306,7 +439,10 @@ const make = Effect.gen(function* () {
       Effect.mapError(() => new SandboxOperationError({ category: "unavailable" })),
     );
   });
-  const connect = Effect.fn("NamespaceClient.connect")(function* (id: string) {
+  const withDevbox = Effect.fn("NamespaceClient.withDevbox")(function* <A>(
+    id: string,
+    operation: (name: string, tokenFile: string) => Effect.Effect<A, SandboxOperationError>,
+  ) {
     const current = yield* fetch(id);
     if (!/^t3-[a-z0-9-]{1,60}$/.test(current.devbox.name) || environment.NSC_TOKEN_FILE)
       return yield* new SandboxOperationError({ category: "unavailable" });
@@ -326,7 +462,7 @@ const make = Effect.gen(function* () {
     if (actual.tenant_id !== expected.tenant_id || actual.actor_id !== expected.actor_id)
       return yield* new SandboxOperationError({ category: "unavailable" });
     yield* run("devbox", ["auth", "check-login", "--duration", "5m"], "", "unavailable");
-    const descriptor = yield* Effect.scoped(
+    return yield* Effect.scoped(
       Effect.gen(function* () {
         const directory = yield* fs
           .makeTempDirectoryScoped({ prefix: "t3-namespace-" })
@@ -341,9 +477,16 @@ const make = Effect.gen(function* () {
             mode: 0o600,
           })
           .pipe(Effect.mapError(() => new SandboxOperationError({ category: "storage" })));
+        return yield* operation(current.devbox.name, filename);
+      }),
+    );
+  });
+  const connect = Effect.fn("NamespaceClient.connect")(function* (id: string) {
+    const { descriptor, name } = yield* withDevbox(id, (name, filename) =>
+      Effect.gen(function* () {
         const output = yield* run(
           "devbox",
-          ["exec", current.devbox.name, "--", "sh", "-c", namespaceBootstrapScript(id)],
+          ["exec", name, "--", "sh", "-c", namespaceBootstrapScript(id)],
           filename,
           "bootstrap",
         );
@@ -352,11 +495,11 @@ const make = Effect.gen(function* () {
         );
         if (descriptor.owner !== id)
           return yield* new SandboxOperationError({ category: "bootstrap" });
-        yield* run("devbox", ["configure-ssh", current.devbox.name], filename, "connection");
-        return descriptor;
+        yield* run("devbox", ["configure-ssh", name], filename, "connection");
+        return { descriptor, name };
       }),
     );
-    const alias = `${current.devbox.name}.devbox.namespace`;
+    const alias = `${name}.devbox.namespace`;
     const output = yield* run(
       "ssh",
       ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "--", alias, "sh", "-s"],
@@ -371,9 +514,71 @@ const make = Effect.gen(function* () {
       return yield* new SandboxOperationError({ category: "connection" });
     return { type: "ssh" as const, target: { alias, hostname: alias, username: null, port: null } };
   });
+  const prepareWorkspace = Effect.fn("NamespaceClient.prepareWorkspace")(function* (
+    input: WorkspaceInput,
+  ) {
+    if (
+      !validId(input.requestId) ||
+      !/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(input.commitSha) ||
+      !path.isAbsolute(input.bundlePath) ||
+      path.isAbsolute(input.projectSubdirectory) ||
+      input.projectSubdirectory.includes("\\") ||
+      input.projectSubdirectory.split("/").includes("..") ||
+      !input.branch ||
+      input.branch.startsWith("-")
+    )
+      return yield* new SandboxOperationError({ category: "invalid_input" });
+    return yield* withDevbox(input.providerId, (name, filename) =>
+      Effect.gen(function* () {
+        const output = yield* run(
+          "devbox",
+          ["exec", name, "--", "sh", "-c", namespaceWorkspaceDescriptorScript(input)],
+          filename,
+          "bootstrap",
+        );
+        const descriptor = yield* decodeWorkspaceDescriptor(output.trim()).pipe(
+          Effect.mapError(() => new SandboxOperationError({ category: "bootstrap" })),
+        );
+        const base = remotePath.join(descriptor.home, "t3-workspaces", input.requestId);
+        if (
+          descriptor.owner !== input.providerId ||
+          !remotePath.isAbsolute(descriptor.home) ||
+          remotePath.normalize(descriptor.home) !== descriptor.home ||
+          descriptor.home.includes("\0") ||
+          descriptor.bundlePath !== remotePath.join(base, input.commitSha + ".bundle")
+        )
+          return yield* new SandboxOperationError({ category: "bootstrap" });
+        yield* run(
+          "devbox",
+          ["upload", name, input.bundlePath, descriptor.bundlePath],
+          filename,
+          "bootstrap",
+        );
+        const prepared = yield* run(
+          "devbox",
+          ["exec", name, "--", "sh", "-c", namespaceWorkspaceScript(input)],
+          filename,
+          "bootstrap",
+        );
+        const result = yield* decodeWorkspaceResult(prepared.trim()).pipe(
+          Effect.mapError(() => new SandboxOperationError({ category: "bootstrap" })),
+        );
+        if (
+          result.projectId !== input.remoteProjectId ||
+          result.branch !== input.branch ||
+          result.workspaceRoot !== remotePath.join(base, "repo", input.projectSubdirectory) ||
+          result.worktreePath !== remotePath.join(base, "worktree", input.projectSubdirectory)
+        )
+          return yield* new SandboxOperationError({ category: "bootstrap" });
+        return result;
+      }),
+    );
+  });
   return NamespaceClient.of({
     creationReplayWindowMs: 0,
+    listTemplates,
     validateCredential,
+    prepareWorkspace,
     recoverCreation,
     create,
     observe,

@@ -111,6 +111,7 @@ describe("command permissions", () => {
           WS_METHODS.sandboxesResume,
           WS_METHODS.sandboxesRemove,
           WS_METHODS.sandboxesConnect,
+          WS_METHODS.namespaceWorktreesPrepare,
         ]) {
           const command = createCommandPermissions(runtime, method);
           expect(registry.get(command.permissionAtom(env))).toBe(false);

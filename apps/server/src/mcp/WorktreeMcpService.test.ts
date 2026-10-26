@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
+  type ServerSettings as ServerSettingsValue,
   EnvironmentId,
   type OrchestrationV2ThreadProjection,
   type Project,
@@ -88,6 +89,7 @@ const project: Project = {
 } as Project;
 
 interface HarnessOptions {
+  readonly settings?: Partial<ServerSettingsValue>;
   readonly git?: Partial<GitWorkflowService.GitWorkflowService["Service"]>;
   readonly thread?: ThreadFixture | null;
   readonly threadReadError?: "projection" | "dispatch";
@@ -301,6 +303,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
         } satisfies Partial<ProjectService.ProjectService["Service"]>),
         ServerSettings.layerTest({
           newWorktreesStartFromOrigin: options.newWorktreesStartFromOrigin ?? false,
+          ...options.settings,
         }),
         Layer.mock(GitWorkflowService.GitWorkflowService)({
           listRefs,
@@ -450,6 +453,39 @@ describe("t3_worktree_handoff", () => {
       ),
     ),
   );
+
+  it.effect("rejects Namespace handoff before fetching or creating a local worktree", () => {
+    const harness = makeHarness({
+      settings: {
+        projectSettingsOverrides: {
+          [projectId]: {
+            namespaceWorktrees: { image: "template", machineType: "small" },
+          },
+        },
+      },
+      newWorktreesStartFromOrigin: true,
+    });
+    return Effect.gen(function* () {
+      const exit = yield* Effect.exit(runHandoff(harness, { branch: "feature/namespace" }));
+      expectTypedFailure(exit, { _tag: "WorktreeMcpFailure", code: "invalid_request" });
+      expect(harness.createWorktree).not.toHaveBeenCalled();
+      expect(harness.fetchWorktreeBaseCommit).not.toHaveBeenCalled();
+      expect(harness.dispatch).not.toHaveBeenCalled();
+    });
+  });
+
+  it.effect("allows a project override to disable Namespace for handoff", () => {
+    const harness = makeHarness({
+      settings: {
+        namespaceWorktrees: { image: "template", machineType: "small" },
+        projectSettingsOverrides: { [projectId]: { namespaceWorktrees: null } },
+      },
+    });
+    return Effect.gen(function* () {
+      yield* runHandoff(harness, { branch: "feature/local" });
+      expect(harness.createWorktree).toHaveBeenCalledTimes(1);
+    });
+  });
 
   it.effect("fails when the thread is already attached to a worktree", () => {
     const harness = makeHarness({

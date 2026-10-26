@@ -914,6 +914,86 @@ const preparationSettled = (threadId: ThreadId) =>
     return yield* threads.getThreadProjection(threadId);
   });
 
+it.effect("rejects a new local worktree before creating a thread when Namespace is enabled", () => {
+  const harness = makeHarness({
+    serverSettings: {
+      projectSettingsOverrides: {
+        [projectId]: { namespaceWorktrees: { image: "ubuntu", machineType: "small" } },
+      },
+    },
+  });
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const input = launchInput({
+      command: "command:launch:namespace",
+      thread: "thread:launch:namespace",
+      workspace: worktreeStrategy,
+    });
+    const result = yield* Effect.result(launches.launch(input));
+    assert.strictEqual(result._tag, "Failure");
+    if (result._tag === "Failure") {
+      assert.strictEqual(result.failure._tag, "ThreadLaunchError");
+      if (result.failure._tag === "ThreadLaunchError") {
+        assert.strictEqual(result.failure.operation, "provision-worktree");
+        assert.include(String(result.failure.cause), "Namespace-capable desktop");
+      }
+    }
+    assert.isNull(yield* threads.getThreadShell(input.threadId));
+    assert.strictEqual(harness.createWorktree.mock.calls.length, 0);
+    assert.strictEqual(harness.runSetup.mock.calls.length, 0);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("keeps local worktree launch when the project disables Namespace", () => {
+  const harness = makeHarness({
+    serverSettings: {
+      namespaceWorktrees: { image: "ubuntu", machineType: "small" },
+      projectSettingsOverrides: { [projectId]: { namespaceWorktrees: null } },
+    },
+  });
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const result = yield* launches.launch(
+      launchInput({
+        command: "command:launch:namespace-off",
+        thread: "thread:launch:namespace-off",
+        workspace: worktreeStrategy,
+        message: "Local worktree",
+      }),
+    );
+    const settled = yield* preparationSettled(result.threadId);
+    assert.equal(settled.thread.worktreePath, "/repo-worktrees/feature");
+    assert.strictEqual(harness.createWorktree.mock.calls.length, 1);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("replays an accepted local worktree launch after Namespace is enabled", () => {
+  const harness = makeHarness();
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const settings = yield* ServerSettings.ServerSettingsService;
+    const input = launchInput({
+      command: "command:launch:namespace-replay",
+      thread: "thread:launch:namespace-replay",
+      workspace: worktreeStrategy,
+      message: "Already accepted",
+    });
+    const first = yield* launches.launch(input);
+    yield* preparationSettled(first.threadId);
+    yield* settings.updateSettings({
+      projectSettingsOverrides: {
+        [projectId]: { namespaceWorktrees: { image: "ubuntu", machineType: "small" } },
+      },
+    });
+    const replay = yield* launches.launch(input);
+    assert.strictEqual(replay.threadId, first.threadId);
+    assert.isTrue(replay.resumed);
+    assert.strictEqual(harness.createWorktree.mock.calls.length, 1);
+    assert.strictEqual(harness.runSetup.mock.calls.length, 1);
+  }).pipe(Effect.provide(harness.layer));
+});
+
 function scheduledTaskInput(id: string, targetProjectId: ProjectId) {
   return {
     id: ScheduledTaskId.make(id),
@@ -934,6 +1014,12 @@ it.effect("launches a worktree request for Scratch at the root, in its own folde
   const harness = scratchHarness();
   return Effect.gen(function* () {
     const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const settings = yield* ServerSettings.ServerSettingsService;
+    yield* settings.updateSettings({
+      projectSettingsOverrides: {
+        [projectId]: { namespaceWorktrees: { image: "ubuntu", machineType: "small" } },
+      },
+    });
     const launched = yield* launches.launch(
       launchInput({
         command: "command:launch:scratch-worktree",

@@ -1,4 +1,12 @@
 import {
+  NamespaceWorktreePrepareInput,
+  NamespaceWorktreePrepareResult,
+  NamespaceWorktreePreparationInput,
+  NamespaceWorktreePreparation,
+  NamespaceWorktreeError,
+} from "./namespaceWorktrees.ts";
+import { NamespaceTemplate } from "./namespaceTemplates.ts";
+import {
   SandboxConfigureInput,
   SandboxConfiguration,
   SandboxListResult,
@@ -438,6 +446,9 @@ export const WS_METHODS = {
   providerInstallSubscribe: "provider.install.subscribe",
   providerInstallRemove: "provider.install.remove",
 
+  namespaceWorktreesPrepare: "namespaceWorktrees.prepare",
+  namespaceWorktreesGetPreparation: "namespaceWorktrees.getPreparation",
+  namespaceTemplatesList: "namespaceTemplates.list",
   sandboxesConfigure: "sandboxes.configure",
   sandboxesList: "sandboxes.list",
   sandboxesCreate: "sandboxes.create",
@@ -1974,7 +1985,28 @@ const WsSandboxesConnectRpc = Rpc.make(WS_METHODS.sandboxesConnect, {
   error: Schema.Union([SandboxOperationError, EnvironmentAuthorizationError]),
 });
 
+const WsNamespaceWorktreesPrepareRpc = Rpc.make(WS_METHODS.namespaceWorktreesPrepare, {
+  payload: NamespaceWorktreePrepareInput,
+  success: NamespaceWorktreePrepareResult,
+  error: Schema.Union([NamespaceWorktreeError, EnvironmentAuthorizationError]),
+});
+const WsNamespaceWorktreesGetPreparationRpc = Rpc.make(
+  WS_METHODS.namespaceWorktreesGetPreparation,
+  {
+    payload: NamespaceWorktreePreparationInput,
+    success: Schema.NullOr(NamespaceWorktreePreparation),
+    error: Schema.Union([NamespaceWorktreeError, EnvironmentAuthorizationError]),
+  },
+);
+
 export const WsRpcGroup = RpcGroup.make(
+  Rpc.make(WS_METHODS.namespaceTemplatesList, {
+    payload: Schema.Struct({}),
+    success: Schema.Array(NamespaceTemplate),
+    error: Schema.Union([SandboxOperationError, EnvironmentAuthorizationError]),
+  }),
+  WsNamespaceWorktreesPrepareRpc,
+  WsNamespaceWorktreesGetPreparationRpc,
   WsSandboxesConfigureRpc,
   WsSandboxesListRpc,
   WsSandboxesCreateRpc,
