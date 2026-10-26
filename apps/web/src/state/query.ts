@@ -20,6 +20,8 @@ export interface EnvironmentQueryView<A, E = unknown> {
 
 export function formatEnvironmentQueryError(cause: Cause.Cause<unknown>): string {
   const error = Cause.squash(cause);
+  if (typeof error === "string" && error.startsWith("Unknown request tag: "))
+    return "This T3 server does not support this request. Update and restart the selected environment's server, then reconnect.";
   return error instanceof Error && error.message.trim().length > 0
     ? error.message
     : "The environment request failed.";
