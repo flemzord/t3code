@@ -1,3 +1,4 @@
+import * as SandboxService from "./sandboxes/SandboxService.ts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -1239,6 +1240,7 @@ export const layerWsRpc = (
   Layer.effectContext(
     Effect.gen(function* () {
       const currentSessionId = currentSession.sessionId;
+      const sandboxes = yield* SandboxService.SandboxService;
       const sql = yield* SqlClient.SqlClient;
       const threadManagement = yield* ThreadManagementService.ThreadManagementService;
       const intakeContext = yield* Effect.context<
@@ -1789,6 +1791,7 @@ export const layerWsRpc = (
             otlpLogsEnabled: config.otlpLogsUrl !== undefined,
           },
           settings,
+          managedSandboxes: true,
           shellResumeCompletionMarker: true,
           shellThreadFamilies: true,
           shellOlderSettled: true,
@@ -2214,6 +2217,14 @@ export const layerWsRpc = (
           Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
             Effect.andThen(scheduledTasks.getWebhookDelivery(input)),
           ),
+        [WS_METHODS.sandboxesConfigure]: (input) => sandboxes.configure(input),
+        [WS_METHODS.sandboxesCreate]: (input) => sandboxes.create(input),
+        [WS_METHODS.sandboxesRefresh]: (input) => sandboxes.refresh(input),
+        [WS_METHODS.sandboxesStop]: (input) => sandboxes.stop(input),
+        [WS_METHODS.sandboxesResume]: (input) => sandboxes.resume(input),
+        [WS_METHODS.sandboxesRemove]: (input) => sandboxes.remove(input),
+        [WS_METHODS.sandboxesConnect]: (input) => sandboxes.connect(input),
+        [WS_METHODS.sandboxesList]: () => sandboxes.list(),
         [WS_METHODS.serverProbe]: (_input) => Effect.succeed({}),
         [WS_METHODS.serverGetConfig]: (_input) =>
           loadServerConfig({ usageLimitsCommand: false, workspaceSnapshotsOnDemand: false }),

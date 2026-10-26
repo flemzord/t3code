@@ -133,6 +133,7 @@ import {
   SavedBackendListRow,
 } from "./SavedEnvironmentRows";
 import { AddEnvironmentDialog } from "./AddEnvironmentDialog";
+import { BoatSandboxesSettings } from "./BoatSandboxesSettings";
 
 const DEFAULT_TAILSCALE_SERVE_PORT = 443;
 const EMPTY_ADVERTISED_ENDPOINTS: ReadonlyArray<AdvertisedEndpoint> = [];
@@ -1527,6 +1528,10 @@ export function ConnectionsSettings() {
           }}
         />
       ) : null}
+      <BoatSandboxesSettings
+        environments={environments}
+        primaryEnvironmentId={primaryEnvironmentId}
+      />
       <LoadBalancingSettings environments={loadBalancingEnvironments} />
       <PullRequestRoutingSettings environments={loadBalancingEnvironments} />
     </SettingsPageContainer>

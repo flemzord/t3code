@@ -1,4 +1,14 @@
 import {
+  SandboxConfigureInput,
+  SandboxConfiguration,
+  SandboxListResult,
+  SandboxCreateInput,
+  SandboxIdInput,
+  SandboxConnectResult,
+  ManagedSandbox,
+  SandboxOperationError,
+} from "./sandboxes.ts";
+import {
   OrchestrationV2SearchThreadError,
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
@@ -427,6 +437,15 @@ export const WS_METHODS = {
   providerInstallCancel: "provider.install.cancel",
   providerInstallSubscribe: "provider.install.subscribe",
   providerInstallRemove: "provider.install.remove",
+
+  sandboxesConfigure: "sandboxes.configure",
+  sandboxesList: "sandboxes.list",
+  sandboxesCreate: "sandboxes.create",
+  sandboxesRefresh: "sandboxes.refresh",
+  sandboxesStop: "sandboxes.stop",
+  sandboxesResume: "sandboxes.resume",
+  sandboxesRemove: "sandboxes.remove",
+  sandboxesConnect: "sandboxes.connect",
 
   vcsPull: "vcs.pull",
   vcsRefreshStatus: "vcs.refreshStatus",
@@ -1914,7 +1933,57 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
   { error: EnvironmentAuthorizationError },
 ) {}
 
+const WsSandboxesConfigureRpc = Rpc.make(WS_METHODS.sandboxesConfigure, {
+  payload: SandboxConfigureInput,
+  success: SandboxConfiguration,
+  error: Schema.Union([SandboxOperationError, EnvironmentAuthorizationError]),
+});
+const WsSandboxesListRpc = Rpc.make(WS_METHODS.sandboxesList, {
+  payload: Schema.Struct({}),
+  success: SandboxListResult,
+  error: Schema.Union([SandboxOperationError, EnvironmentAuthorizationError]),
+});
+const WsSandboxesCreateRpc = Rpc.make(WS_METHODS.sandboxesCreate, {
+  payload: SandboxCreateInput,
+  success: ManagedSandbox,
+  error: Schema.Union([SandboxOperationError, EnvironmentAuthorizationError]),
+});
+const WsSandboxesRefreshRpc = Rpc.make(WS_METHODS.sandboxesRefresh, {
+  payload: SandboxIdInput,
+  success: ManagedSandbox,
+  error: Schema.Union([SandboxOperationError, EnvironmentAuthorizationError]),
+});
+const WsSandboxesStopRpc = Rpc.make(WS_METHODS.sandboxesStop, {
+  payload: SandboxIdInput,
+  success: ManagedSandbox,
+  error: Schema.Union([SandboxOperationError, EnvironmentAuthorizationError]),
+});
+const WsSandboxesResumeRpc = Rpc.make(WS_METHODS.sandboxesResume, {
+  payload: SandboxIdInput,
+  success: ManagedSandbox,
+  error: Schema.Union([SandboxOperationError, EnvironmentAuthorizationError]),
+});
+const WsSandboxesRemoveRpc = Rpc.make(WS_METHODS.sandboxesRemove, {
+  payload: SandboxIdInput,
+  success: ManagedSandbox,
+  error: Schema.Union([SandboxOperationError, EnvironmentAuthorizationError]),
+});
+const WsSandboxesConnectRpc = Rpc.make(WS_METHODS.sandboxesConnect, {
+  payload: SandboxIdInput,
+  success: SandboxConnectResult,
+  error: Schema.Union([SandboxOperationError, EnvironmentAuthorizationError]),
+});
+
 export const WsRpcGroup = RpcGroup.make(
+  WsSandboxesConfigureRpc,
+  WsSandboxesListRpc,
+  WsSandboxesCreateRpc,
+  WsSandboxesRefreshRpc,
+  WsSandboxesStopRpc,
+  WsSandboxesResumeRpc,
+  WsSandboxesRemoveRpc,
+  WsSandboxesConnectRpc,
+
   WsGuestShareCreateRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,

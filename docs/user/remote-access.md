@@ -191,6 +191,45 @@ again on its next connect.
 For Antigravity's Google callback on a remote host, see
 [remote sign-in](./providers-antigravity.md#sign-in-from-a-remote-device).
 
+## Cloud machines
+
+On web and desktop, open **Settings → Connections → Cloud machines**. Choose a
+connected controller environment, then configure Boat or Namespace with its own
+API credential. The controller stores the credential and the machine inventory;
+it must be reachable when you manage machines. Creating machines uses your cloud
+provider account and incurs its normal charges.
+
+Create a machine from a clean template with the required development tools.
+For Boat, enter a saved snapshot name. For Namespace, enter a clean image name
+or OCI image reference; blueprints are not supported. The template needs Node.js 24 or newer,
+npm, systemd, curl, and passwordless sudo. Keep T3 identities, databases, connection
+credentials, and provider sessions out of the template. After the machine starts,
+choose **Connect**, sign in to your coding providers, and add your repository as
+a project. Threads and worktrees then run on that machine. The independent T3
+service keeps running when you close Desktop.
+
+Boat connects through its HTTPS endpoint, protected by T3 pairing. Namespace
+connects through SSH and currently requires Desktop's local environment as the
+controller, with the official `devbox` CLI installed and signed in with `devbox login` to
+the same account and tenant as the saved API token. Other controller environments
+can manage its lifecycle, but cannot configure an SSH connection on your desktop.
+
+Use **Refresh** to reconcile a machine after a request fails or its state changes.
+Retry an unanswered creation with its original request; starting a new request
+can create another billed machine. **Stop** ends running processes and preserves
+the disk according to the provider's retention policy. **Resume** restores that
+machine's environment and saved threads, not the previous live processes.
+
+**Delete** permanently removes the machine's files and thread history. Preserve
+uncommitted work and any required history first. Creating a fresh machine does
+not transfer threads from a deleted one. Removing the API credential only removes
+the controller's access; it does not stop or delete existing machines.
+
+The duration policy belongs to the selected provider. Boat's stop deadline does
+not automatically follow T3 agent activity. Namespace also enforces plan-specific
+maximum runtimes. This version does not configure a custom Namespace stop deadline. Stop machines explicitly when finished and check their final
+state; an accepted stop or deletion is still in progress.
+
 ## Browser on a remote environment
 
 Browser tabs belong to the environment, so you and your agents see the same

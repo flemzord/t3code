@@ -64,6 +64,21 @@ describe("RPC authorization scopes", () => {
     }
   });
 
+  it("requires maintain permission for Boat inventory and lifecycle", () => {
+    for (const method of [
+      WS_METHODS.sandboxesConfigure,
+      WS_METHODS.sandboxesList,
+      WS_METHODS.sandboxesCreate,
+      WS_METHODS.sandboxesRefresh,
+      WS_METHODS.sandboxesStop,
+      WS_METHODS.sandboxesResume,
+      WS_METHODS.sandboxesRemove,
+      WS_METHODS.sandboxesConnect,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthEnvironmentMaintainScope);
+    }
+  });
+
   it("rejects unknown RPC method names", () => {
     for (const method of ["server.notRegistered", "toString", "constructor"]) {
       expect(() => requiredScopeForRpcMethod(method)).toThrow(

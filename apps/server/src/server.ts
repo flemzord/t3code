@@ -1,3 +1,8 @@
+import * as NamespaceClient from "./sandboxes/NamespaceClient.ts";
+import * as SandboxProviders from "./sandboxes/SandboxProviders.ts";
+import * as SandboxService from "./sandboxes/SandboxService.ts";
+import * as SandboxStore from "./sandboxes/SandboxStore.ts";
+import * as BoatClient from "./sandboxes/BoatClient.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import type { RelayManagedEndpointRuntimeConfig } from "@t3tools/contracts/relay";
 import * as Random from "effect/Random";
@@ -570,6 +575,22 @@ const layerProviderInstallationRefresh = Layer.effectDiscard(
   }),
 );
 
+const layerSandboxProviders = Layer.effect(
+  SandboxProviders.SandboxProviders,
+  Effect.gen(function* () {
+    const boat = yield* BoatClient.BoatClient;
+    const namespace = yield* NamespaceClient.NamespaceClient;
+    return SandboxProviders.SandboxProviders.of({
+      get: (provider) => (provider === "boat" ? boat : namespace),
+    });
+  }),
+).pipe(Layer.provide(Layer.mergeAll(BoatClient.layer, NamespaceClient.layer)));
+
+const layerSandboxes = SandboxService.layer.pipe(
+  Layer.provide(Layer.mergeAll(SandboxStore.layer, layerSandboxProviders)),
+  Layer.provide(ServerSecretStore.layer),
+);
+
 const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   AgentAwarenessRelay.layer,
   HeldHooksWaker.layer,
@@ -613,6 +634,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   ProviderUsageLimitsIngestion.layer,
   layerProviderInstallationRefresh,
   ReplayMarkers.layer,
+  layerSandboxes,
   Layer.effectDiscard(ProjectSettingsOverrideSweep.sweep),
 ).pipe(
   Layer.provideMerge(layerOrchestrationApplication),

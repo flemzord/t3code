@@ -7,6 +7,7 @@ import type { RpcSession } from "../rpc/session.ts";
 import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 import {
+  AuthEnvironmentMaintainScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthPreviewOperateScope,
@@ -85,6 +86,40 @@ describe("command permissions", () => {
         expect((yield* close.authorize(registry, other).pipe(Effect.flip))._tag).toBe(
           "EnvironmentAuthorizationError",
         );
+      }),
+    ),
+  );
+
+  it.effect("requires the destination maintain grant for Boat lifecycle commands", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        registry.set(
+          sessions(other),
+          AsyncResult.success({
+            ...grant(true),
+            scopes: [AuthEnvironmentMaintainScope],
+            permissions: [AuthEnvironmentMaintainScope],
+          }),
+        );
+        for (const method of [
+          WS_METHODS.sandboxesConfigure,
+          WS_METHODS.sandboxesCreate,
+          WS_METHODS.sandboxesRefresh,
+          WS_METHODS.sandboxesStop,
+          WS_METHODS.sandboxesResume,
+          WS_METHODS.sandboxesRemove,
+          WS_METHODS.sandboxesConnect,
+        ]) {
+          const command = createCommandPermissions(runtime, method);
+          expect(registry.get(command.permissionAtom(env))).toBe(false);
+          expect((yield* command.authorize(registry, env).pipe(Effect.flip))._tag).toBe(
+            "EnvironmentAuthorizationError",
+          );
+          expect(registry.get(command.permissionAtom(other))).toBe(true);
+          yield* command.authorize(registry, other);
+        }
       }),
     ),
   );

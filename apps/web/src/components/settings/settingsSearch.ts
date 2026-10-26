@@ -1023,6 +1023,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["add pair backend host code ssh config agent tunnel saved t3 connect"],
   },
   {
+    id: "managed-sandboxes",
+    title: "Cloud machines",
+    to: "/settings/connections",
+    searchTerms: [
+      "boat boat.dev namespace namespace.so sandbox virtual machine vm create resume stop delete template cloud",
+    ],
+  },
+  {
     id: "load-balancing",
     title: "Load balancing",
     to: "/settings/connections",

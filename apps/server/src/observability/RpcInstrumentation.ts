@@ -11,6 +11,15 @@ type WsRpcMethod = RpcGroup.Rpcs<typeof WsRpcGroup>["_tag"];
 
 // Trace queries and dashboards depend on these labels, including deviations from method prefixes.
 const RPC_AGGREGATES = {
+  [WS_METHODS.sandboxesConfigure]: "sandboxes",
+  [WS_METHODS.sandboxesList]: "sandboxes",
+  [WS_METHODS.sandboxesCreate]: "sandboxes",
+  [WS_METHODS.sandboxesRefresh]: "sandboxes",
+  [WS_METHODS.sandboxesStop]: "sandboxes",
+  [WS_METHODS.sandboxesResume]: "sandboxes",
+  [WS_METHODS.sandboxesRemove]: "sandboxes",
+  [WS_METHODS.sandboxesConnect]: "sandboxes",
+
   [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: "orchestrationV2",
   [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: "orchestration",
   [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: "orchestration",

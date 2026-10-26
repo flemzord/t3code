@@ -199,6 +199,10 @@
       "types": "./src/state/presentation.ts",
       "default": "./src/state/presentation.ts"
     },
+    "./state/sandboxes": {
+      "types": "./src/state/sandboxes.ts",
+      "default": "./src/state/sandboxes.ts"
+    },
     "./state/device": {
       "types": "./src/state/device.ts",
       "default": "./src/state/device.ts"

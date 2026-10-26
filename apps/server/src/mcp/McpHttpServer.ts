@@ -1,3 +1,5 @@
+import { SandboxToolkit } from "./toolkits/sandboxes/tools.ts";
+import * as SandboxHandlers from "./toolkits/sandboxes/handlers.ts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -1001,6 +1003,8 @@ const layerPreviewControlsRegistration = toolkitRegistration(
   PreviewControlsHandlers.layer,
 );
 
+const layerSandboxToolkit = toolkitRegistration(SandboxToolkit, SandboxHandlers.layer);
+
 const layerEnvironmentToolkit = toolkitRegistration(
   EnvironmentToolkit,
   EnvironmentHandlers.layer,
@@ -1048,6 +1052,7 @@ export const layer = Layer.mergeAll(
   layerAttachmentToolkit,
   layerProjectRegistration,
   layerEnvironmentToolkit,
+  layerSandboxToolkit,
   layerPreviewControlsRegistration,
   layerWorktreeToolkitRegistration,
   layerPullRequestsToolkit,

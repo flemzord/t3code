@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { ChevronsLeftRightEllipsisIcon, PlusIcon, TerminalIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
@@ -50,7 +51,7 @@ import { useEnvironmentQuery } from "~/state/query";
 import { desktopSshHostsStateAtom, filterDiscoveredSshHosts } from "~/state/desktopSshHosts";
 import { type EnvironmentPresentation, useRelayEnvironmentDiscovery } from "~/state/environments";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { primaryServerKeybindingsAtom } from "~/state/server";
+import { primaryServerConfigAtom, primaryServerKeybindingsAtom } from "~/state/server";
 import {
   resolveShortcutCommand,
   shortcutLabelForCommand,
@@ -83,6 +84,10 @@ export function AddEnvironmentDialog({
 }) {
   const desktopBridge = window.desktopBridge;
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const primaryConfig = useAtomValue(primaryServerConfigAtom);
+  const supportsCloudMachines =
+    primaryConfig?.managedSandboxes === true ||
+    savedEnvironments.some((environment) => environment.serverConfig?.managedSandboxes === true);
   const connectPairing = useAtomCommand(connectPairingAtom, { reportFailure: false });
   const connectSshEnvironment = useAtomCommand(connectSshEnvironmentAtom, {
     reportFailure: false,
@@ -641,6 +646,17 @@ export function AddEnvironmentDialog({
             <AnimatedHeight>
               {savedBackendMode === "ssh" ? renderSshFields() : renderRemoteModeBody()}
             </AnimatedHeight>
+            {!routeTarget && supportsCloudMachines ? (
+              <Button
+                size="sm"
+                variant="link"
+                disabled={isAddingSavedBackend}
+                render={<Link to="/settings/connections" hash="managed-sandboxes" />}
+                onClick={() => onOpenChange(false)}
+              >
+                Create a Boat or Namespace machine
+              </Button>
+            ) : null}
           </div>
         </DialogPanel>
       </DialogPopup>
